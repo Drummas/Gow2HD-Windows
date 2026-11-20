@@ -160,6 +160,19 @@ static void setdef(const char* k, const char* v)
     if (!env_set(k)) _putenv_s(k, v);
 }
 
+/* A path value from gow2_port.ini: absolute (drive letter, UNC \\server, /root) stays as written, anything else is
+ * resolved against the exe folder. build.py stores a game folder inside the install that way (vfs_root), so the
+ * install can be renamed or moved without touching the ini. */
+static void setdef_path(const char* k, const char* v)
+{
+    char full[MAX_PATH * 2];
+    if (!s_exe_dir[0] || (v[0] && (v[1] == ':' || v[0] == '\\' || v[0] == '/')))
+        snprintf(full, sizeof full, "%s", v);
+    else
+        snprintf(full, sizeof full, "%s\\%s", s_exe_dir, v);
+    setdef(k, full);
+}
+
 static void trim(char* s)
 {
     size_t n = strlen(s);
@@ -167,7 +180,7 @@ static void trim(char* s)
 }
 
 /* gow2_port.ini next to the exe (written by build.py):
- *   vfs_root=<the game's USRDIR folder>     -> PS3_VFS_ROOT
+ *   vfs_root=<the game's USRDIR folder>     -> PS3_VFS_ROOT  (relative = to the exe folder)
  *   movie_cache=<folder>                    -> PS3_MOVIE_CACHE (relative = to the exe folder)
  *   KEY=VALUE under [env]                   -> extra defaults (environment still wins) */
 static void read_port_ini(void)
@@ -185,13 +198,8 @@ static void read_port_ini(void)
         char* eq = strchr(s, '='); if (!eq) continue;
         *eq = 0; char* k = s; char* v = eq + 1; trim(k);
         if (in_env) { setdef(k, v); continue; }
-        if (!_stricmp(k, "vfs_root")) setdef("PS3_VFS_ROOT", v);
-        else if (!_stricmp(k, "movie_cache")) {
-            char full[MAX_PATH * 2];
-            if (v[0] && (v[1] == ':' || v[0] == '\\' || v[0] == '/')) snprintf(full, sizeof full, "%s", v);
-            else snprintf(full, sizeof full, "%s\\%s", s_exe_dir, v);
-            setdef("PS3_MOVIE_CACHE", full);
-        }
+        if (!_stricmp(k, "vfs_root")) setdef_path("PS3_VFS_ROOT", v);
+        else if (!_stricmp(k, "movie_cache")) setdef_path("PS3_MOVIE_CACHE", v);
     }
     fclose(f);
 }

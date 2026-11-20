@@ -34,6 +34,7 @@ notes/<data>-fase10-inventario-marcadores.md (a data e' fixa nesta sessao:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -43,6 +44,35 @@ REPO = Path(__file__).resolve().parent
 PATCH_DIR = REPO / "recomp_mid_v2"
 NOTES_DIR = REPO / "notes"
 REPORT_PATH = NOTES_DIR / "2026-07-31-fase10-inventario-marcadores.md"
+
+
+def checkout_root(start: Path) -> Path:
+    """Raiz do checkout: o ascendente mais proximo com .git ou build.py."""
+    for p in (start, *start.parents):
+        if (p / ".git").exists() or (p / "build.py").is_file():
+            return p
+    return start
+
+
+def stored_path(p) -> str:
+    """`p` como fica GRAVADO no relatorio versionado.
+
+    Relativo a' raiz do checkout quando esta' dentro dela; absoluto so' quando
+    esta' fora (nao ha' forma relativa, ou e' outra drive). Um caminho absoluto
+    da maquina de quem correu o gerador dentro de um ficheiro versionado e'
+    ruido e ma' reproducao -- a mesma regra em lift_baseline/gen_catalog.py.
+    """
+    ap = Path(p)
+    if not ap.is_absolute():
+        ap = Path.cwd() / ap
+    ap = ap.resolve()
+    try:
+        rel = Path(os.path.relpath(ap, checkout_root(REPO)))
+    except ValueError:          # Windows: outra drive nao tem forma relativa
+        return ap.as_posix()
+    if rel.parts and rel.parts[0] == os.pardir:
+        return ap.as_posix()
+    return rel.as_posix()
 
 # Tag entre parenteses rectos dentro de fprintf: "[FIOS-HOST-POP]", "[AREAD]"...
 TAG_BRACKET_RE = re.compile(r"\[([A-Z][A-Z0-9]*(?:-[A-Z0-9]+){1,})\]")
@@ -178,8 +208,8 @@ def main() -> int:
 
     emit("=" * 78)
     emit(" inventory_lift_markers.py -- Fase 10, inventario antes de codigo")
-    emit(f" referencia : {ref_dir}")
-    emit(f" actual     : {cur_dir}")
+    emit(f" referencia : {stored_path(ref_dir)}")
+    emit(f" actual     : {stored_path(cur_dir)}")
     emit("=" * 78)
     emit()
 

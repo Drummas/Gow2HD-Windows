@@ -33,6 +33,17 @@ TOOLS = [
 ]
 
 
+def stored_path(p, base):
+    """As in the real build.py: relative to `base` when the path lies inside it, absolute otherwise."""
+    try:
+        rel = os.path.relpath(os.path.abspath(p), os.path.abspath(base))
+    except ValueError:                      # Windows: another drive has no relative form
+        return p
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return p
+    return rel.replace("\\", "/")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--print-tools", action="store_true")
@@ -89,7 +100,7 @@ def main():
     with open(os.path.join(a.out, "movie_cache", "stub.txt"), "w") as f:
         f.write("stub movie cache\n")
     with open(os.path.join(a.out, "gow2_port.ini"), "w") as f:
-        f.write("[paths]\nvfs_root=%s\nmovie_cache=movie_cache\n" % os.path.join(a.game, "USRDIR"))
+        f.write("[paths]\nvfs_root=%s\nmovie_cache=movie_cache\n" % stored_path(os.path.join(a.game, "USRDIR"), a.out))
     with open(os.path.join(a.out, "build_info.json"), "w") as f:
         json.dump({"exe": "gow2.exe", "installed": ["gow2.exe", "gow2_port.ini", "build_info.json"],
                    "installed_dirs": [".build", "movie_cache"]}, f)

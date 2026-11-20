@@ -67,12 +67,43 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import os
 import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 MONOREPO_ROOT = HERE.parents[2]
+
+
+def checkout_root(start: Path) -> Path:
+    """Raiz do checkout: o ascendente mais proximo com .git ou build.py."""
+    for p in (start, *start.parents):
+        if (p / ".git").exists() or (p / "build.py").is_file():
+            return p
+    return start
+
+
+def stored_path(p) -> str:
+    """`p` como fica GRAVADO no TSV versionado.
+
+    Relativo a' raiz do checkout quando esta' dentro dela; absoluto so' quando
+    esta' fora (nao ha' forma relativa, ou e' outra drive). Um caminho absoluto
+    da maquina de quem correu o gerador dentro de um ficheiro versionado e'
+    ruido e ma' reproducao -- a mesma regra em gen_catalog.py.
+    """
+    ap = Path(p)
+    if not ap.is_absolute():
+        ap = Path.cwd() / ap
+    ap = ap.resolve()
+    try:
+        rel = Path(os.path.relpath(ap, checkout_root(HERE)))
+    except ValueError:          # Windows: outra drive nao tem forma relativa
+        return ap.as_posix()
+    if rel.parts and rel.parts[0] == os.pardir:
+        return ap.as_posix()
+    return rel.as_posix()
+
 
 COLUMNS = (
     "patch",
@@ -514,8 +545,8 @@ def medir_contagens(
         "n_build": len(build_nomes),
         "n_mono": len(mono_nomes),
         "n_cat": len(catalog),
-        "build_dir": str(build_dir),
-        "mono_dir": str(mono_dir),
+        "build_dir": stored_path(build_dir),
+        "mono_dir": stored_path(mono_dir),
         "so_no_mono": sorted(mono_nomes - build_nomes),
     }
 
@@ -726,12 +757,10 @@ def main(argv: list[str] | None = None) -> int:
 
     catalog = load_catalog(catalog_path)
     rows = build_rows(catalog, build_dir, mono_dir, anterior=anterior)
-    contagens = medir_contagens(catalog, build_dir, mono_dir)
-    # No cabecalho ficam os paths COMO FORAM PEDIDOS (relativos a' raiz do
-    # monorepo), nao os absolutos da maquina de quem correu: o TSV e'
+    # No cabecalho ficam os paths como ficam GRAVADOS (medir_contagens ->
+    # stored_path), nao os absolutos da maquina de quem correu: o TSV e'
     # versionado e um /Users/<alguem>/ la' dentro e' ruido e ma' reproducao.
-    contagens["build_dir"] = args.build_dir
-    contagens["mono_dir"] = args.mono_dir
+    contagens = medir_contagens(catalog, build_dir, mono_dir)
     texto = render_tsv(rows, contagens)
 
     if args.output:

@@ -13,7 +13,8 @@
 --rap    your licence UP9000-NPUA80491_00-GODOFWARIIHDUS00.rap (RPCS3: dev_hdd0/home/<user>/exdata)
 --elf    an EBOOT.ELF you already decrypted (then --rap is not needed)
 --tools  folder holding the downloads listed by --print-tools, each extracted into its "extract-to" subfolder
---out    install folder: the game exe, EBOOT.ELF, movie_cache, ffmpeg, gow2_port.ini (the game folder path);
+--out    install folder: the game exe, EBOOT.ELF, movie_cache, ffmpeg, gow2_port.ini (the game folder path, stored
+         relative when it lies inside the install);
          build intermediates go to <out>/.build (needed to resume or rebuild quickly; safe to delete afterwards)
 --jobs   parallel compile jobs (default: number of CPUs)
 
@@ -37,6 +38,23 @@ sys.dont_write_bytecode = True
 REPO = os.path.dirname(os.path.abspath(__file__))
 WINPORT = os.path.join(REPO, "winport")
 sys.path.insert(0, WINPORT)
+
+
+def stored_path(p, base=None):
+    """A path as we record it in a file we write (build_info.json, gow2_port.ini): relative to `base` -- the
+    repository root by default, the install folder for the runtime config -- when it lies inside it, absolute only
+    when it does not (there is no relative form, or it is on another drive). A build that uses a game folder or .pkg
+    from this checkout then records gow2-recomp/... instead of the absolute path of the machine that ran it."""
+    if not p:
+        return None
+    ap = os.path.abspath(p)
+    try:
+        rel = os.path.relpath(ap, base or REPO)
+    except ValueError:   # Windows: another drive has no relative form
+        return ap
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return ap
+    return rel.replace("\\", "/")
 
 EXE_NAME = "gow2hd.exe"
 ELF_SHA = "23cfd435be284adb83745c3e1bcad7b7660782470f71255cb74a1d2be8b1163b"   # NPUA80491 v01.00 (kit/setup.sh)
@@ -518,15 +536,17 @@ def main(argv=None):
     ini = os.path.join(out, "gow2_port.ini")
     with open(ini + ".tmp", "w", encoding="utf-8", newline="\r\n") as f:
         f.write("# Written by build.py. The game reads its data from vfs_root (the game's USRDIR folder).\n"
+                "# A relative vfs_root or movie_cache is resolved against this folder (the exe's), so the install can\n"
+                "# be renamed or moved; a game folder outside the install is written as an absolute path.\n"
                 "# Extra environment defaults may be added under [env] as KEY=VALUE.\n"
-                "[paths]\nvfs_root=%s\nmovie_cache=movie_cache\n" % usr)
+                "[paths]\nvfs_root=%s\nmovie_cache=movie_cache\n" % stored_path(usr, out))
     os.replace(ini + ".tmp", ini)
     with open(os.path.join(out, "build_info.json"), "w", encoding="utf-8") as f:
-        json.dump({"exe": EXE_NAME, "game": game, "elf_sha256": ELF_SHA, "built": time.strftime("%Y-%m-%d %H:%M:%S"),
+        json.dump({"exe": EXE_NAME, "game": stored_path(game), "elf_sha256": ELF_SHA, "built": time.strftime("%Y-%m-%d %H:%M:%S"),
                    "seconds": round(time.time() - t_start),
                    "installed": installed + ["gow2_port.ini", "build_info.json"],
                    "installed_dirs": [".build", "movie_cache", "licenses"] + (["game"] if a.pkg else []),
-                   "pkg": os.path.abspath(a.pkg) if a.pkg else None}, f, indent=2)
+                   "pkg": stored_path(a.pkg)}, f, indent=2)
     log("build finished in %.0f s" % (time.time() - t_start))
     progress(100, "done: %s" % os.path.join(out, EXE_NAME))
     sys.stdout.write("EXE %s\n" % os.path.join(out, EXE_NAME))   # the launcher starts this exe (cwd = its folder)

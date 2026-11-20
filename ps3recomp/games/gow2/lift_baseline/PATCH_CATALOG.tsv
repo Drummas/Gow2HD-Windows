@@ -1,6 +1,6 @@
 # PATCH_CATALOG.tsv -- catalogo DERIVADO por gen_catalog.py, NUNCA editado a mao
 # regenerar: .venv/bin/python3 games/gow2/lift_baseline/gen_catalog.py ../gow2-recomp/recomp_mid_v2 games/gow2/lift_baseline/MANIFEST.tsv > games/gow2/lift_baseline/PATCH_CATALOG.tsv
-# fonte: /Users/andrebrumcortezferreira/Documents/PESSOAL/gow2-recomp/recomp_mid_v2
+# fonte: gow2-recomp/recomp_mid_v2
 # 177 patches classificados nesta geracao (99 FUNCIONAL / 78 PROBE), zero indeterminados (D-4.3/D-4.4).
 # Linha de base historica (2026-07-26, primeira medicao contra o corpus real): 64 FUNCIONAL / 23 PROBE / 87 total -- corrigiu os 73/71 desactualizados do ROADMAP. Os numeros da linha acima sao os DESTA geracao e sobrepoem-se a estes; qualquer divergencia e' crescimento do corpus, nao erro.
 # RECLASSIFICACAO 2026-08-03 (ramo 2b) -- quatro patches passam de FUNCIONAL/misc a PROBE/diagnostico:

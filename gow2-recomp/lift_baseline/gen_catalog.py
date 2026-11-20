@@ -61,11 +61,42 @@ Uso:
 from __future__ import annotations
 
 import ast
+import os
 import sys
 import re
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+
+
+def checkout_root(start: Path) -> Path:
+    """Raiz do checkout: o ascendente mais proximo com .git ou build.py."""
+    for p in (start, *start.parents):
+        if (p / ".git").exists() or (p / "build.py").is_file():
+            return p
+    return start
+
+
+def stored_path(p) -> str:
+    """`p` como fica GRAVADO no TSV versionado.
+
+    Relativo a' raiz do checkout quando esta' dentro dela; absoluto so' quando
+    esta' fora (nao ha' forma relativa, ou e' outra drive). Um caminho absoluto
+    da maquina de quem correu o gerador dentro de um ficheiro versionado e'
+    ruido e ma' reproducao -- a mesma regra em gen_migration_ledger.py.
+    """
+    ap = Path(p)
+    if not ap.is_absolute():
+        ap = Path.cwd() / ap
+    ap = ap.resolve()
+    try:
+        rel = Path(os.path.relpath(ap, checkout_root(HERE)))
+    except ValueError:          # Windows: outra drive nao tem forma relativa
+        return ap.as_posix()
+    if rel.parts and rel.parts[0] == os.pardir:
+        return ap.as_posix()
+    return rel.as_posix()
+
 
 # Tokens de despacho real: OPD deref (ps3_call_opd), trampolim global
 # (g_trampoline_fn =), ou retorno imediato apos indirect-call (padrao de
@@ -307,7 +338,7 @@ def render_tsv(rows: list[dict], patch_dir: Path) -> str:
         "# regenerar: .venv/bin/python3 games/gow2/lift_baseline/gen_catalog.py "
         "../gow2-recomp/recomp_mid_v2 games/gow2/lift_baseline/MANIFEST.tsv "
         "> games/gow2/lift_baseline/PATCH_CATALOG.tsv",
-        f"# fonte: {patch_dir}",
+        f"# fonte: {stored_path(patch_dir)}",
         f"# {total} patches classificados nesta geracao "
         f"({n_func} FUNCIONAL / {n_probe} PROBE), zero indeterminados (D-4.3/D-4.4).",
         "# Linha de base historica (2026-07-26, primeira medicao contra o corpus real):"
