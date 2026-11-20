@@ -14,7 +14,8 @@
 # A manual run (Actions -> Release -> Run workflow, "publish" ticked) releases the version given in the `version`
 # input -- the launcher version from launcher/src/config.h when it is left empty -- and then builds the exe. It
 # refuses, before creating anything, a version that is already tagged or released, a version the exe would not
-# report, and a version without its CHANGELOG section.
+# report, and a version without its CHANGELOG section. The push path runs the same check on the pushed subjects
+# before the action touches the API, so pushing a second "Release: vX.Y.Z" fails with one clear line.
 name: Release
 
 on:
@@ -49,6 +50,52 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check the version before anything is created
+        # The action would otherwise send the tag to the API and fail there with a 422. This reads the same subjects
+        # the action will match and stops with the same message the manual run uses when the version is already
+        # tagged or released, or is not the version the exe will report.
+        id: precheck
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILT=$(sed -n 's/^#define LAUNCHER_VERSION *"\(.*\)"/\1/p' launcher/src/config.h)
+          BEFORE='${{ github.event.before }}'
+          AFTER='${{ github.event.after }}'
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            RANGE="$AFTER"                      # new branch: scanning its whole history is harmless
+          else
+            RANGE="$BEFORE..$AFTER"
+          fi
+          found=0
+          while IFS= read -r subject; do
+            if ! printf '%s' "$subject" | grep -Eq '^[Rr]elease: v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?([[:space:]]|$)'; then
+              continue
+            fi
+            found=1
+            VER=$(printf '%s' "$subject" | grep -Eo '^[Rr]elease: v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | sed -E 's/^[Rr]elease: v//')
+            if [ -z "$BUILT" ]; then
+              echo "::error::no version to release: LAUNCHER_VERSION is missing from launcher/src/config.h"
+              exit 1
+            fi
+            if [ "$VER" != "$BUILT" ]; then
+              echo "::error::v$VER cannot be released from this commit: the exe reports $BUILT (LAUNCHER_VERSION in"
+              echo "launcher/src/config.h). Bump that constant, commit it, and push again -- otherwise the tag, the"
+              echo "update check and the exe would disagree."
+              exit 1
+            fi
+            if gh release view "v$VER" >/dev/null 2>&1; then
+              echo "::error::release v$VER already exists (https://github.com/${{ github.repository }}/releases/tag/v$VER). Bump LAUNCHER_VERSION to the next version instead of publishing this one again."
+              exit 1
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/v$VER" >/dev/null 2>&1; then
+              echo "::error::tag v$VER already exists on origin without a release pointing at it; delete it or pick another version."
+              exit 1
+            fi
+            echo "v$VER is not tagged and not released: the action may publish it"
+          done < <(git log --format=%s "$RANGE")
+          if [ "$found" = 0 ]; then echo "no Release: vX.Y.Z subject in this push; nothing to check"; fi
 
       - name: Release on a Release line
         id: release

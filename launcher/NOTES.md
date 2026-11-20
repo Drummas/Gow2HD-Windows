@@ -59,7 +59,9 @@ to name the version being released: the tag, `SCRIPTS_URL` (download mode) and t
 release by hand, run the workflow from the Actions tab with `publish` ticked and the `version` input filled in (empty
 means `LAUNCHER_VERSION`); it builds the exe as well. The manual run stops before creating anything, with a line per
 problem, when the version is not the one `src/config.h` reports, when its tag or release already exists on GitHub, or
-when `CHANGELOG.md` has no `## vX.Y.Z` section for it.
+when `CHANGELOG.md` has no `## vX.Y.Z` section for it. The push path runs the same version, release and tag checks on
+the pushed commit subjects before the action touches the API, so pushing the same `Release: vX.Y.Z` a second time fails
+with that one clear line instead of an API error.
 
 ## Contract with build.py (for the builder agent)
 
