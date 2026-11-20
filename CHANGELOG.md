@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.1 (2026-11-20)
+
+Install folders and checkouts can be renamed or moved without confusing the launcher.
+
+* **Paths:** the build records the game folder, the `.pkg` and the runtime config's `vfs_root` relative to the install
+  folder (and `build_info.json` relative to the project) when they lie inside it, and absolute only when they do not.
+  Renaming the install folder or the checkout no longer breaks a finished build or a rebuild.
+* **Launcher:** the build state (`game`, licence, ELF and the built exe) is stored relative to the install folder and
+  resolved on every read, and the install itself is found again after a rename: the launcher recognises the folder it
+  runs from and corrects the path it remembered. When it runs from somewhere else (download and run), it offers a
+  folder picker instead of showing the setup page as if the build had been deleted; answering No forgets the old
+  folder, so the next start is a plain first run rather than the same question again.
+* **Reports:** the catalog and marker reports no longer embed the absolute paths of the machine that generated them.
+
 ## v0.1.0 (2026-10-11)
 
 First public release.
