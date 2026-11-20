@@ -56,8 +56,10 @@ commit. On such a push:
 
 Any other commit subject publishes nothing, even when it mentions a version. `LAUNCHER_VERSION` in `src/config.h` has
 to name the version being released: the tag, `SCRIPTS_URL` (download mode) and the update check all derive from it. To
-publish or refresh the release for the current `LAUNCHER_VERSION` by hand, run the workflow from the Actions tab with
-`publish` ticked; it builds the exe as well.
+release by hand, run the workflow from the Actions tab with `publish` ticked and the `version` input filled in (empty
+means `LAUNCHER_VERSION`); it builds the exe as well. The manual run stops before creating anything, with a line per
+problem, when the version is not the one `src/config.h` reports, when its tag or release already exists on GitHub, or
+when `CHANGELOG.md` has no `## vX.Y.Z` section for it.
 
 ## Contract with build.py (for the builder agent)
 

@@ -8,12 +8,13 @@
 #
 #     Optional body explaining the release.
 #
-# and CHANGELOG.md already carries a "## v0.1.1" section, which becomes the release description. Everything else,
+# and CHANGELOG.md already carries a "## vX.Y.Z" section, which becomes the release description. Everything else,
 # including an ordinary commit that merely mentions a version, publishes nothing.
 #
-# A manual run (Actions -> Release -> Run workflow, "publish" ticked) publishes or refreshes the release for the
-# launcher version in launcher/src/config.h and then builds the exe, which is also how the assets of an existing
-# release are filled in without a new version.
+# A manual run (Actions -> Release -> Run workflow, "publish" ticked) releases the version given in the `version`
+# input -- the launcher version from launcher/src/config.h when it is left empty -- and then builds the exe. It
+# refuses, before creating anything, a version that is already tagged or released, a version the exe would not
+# report, and a version without its CHANGELOG section.
 name: Release
 
 on:
@@ -22,9 +23,14 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Build and publish a release for main (unchecked: run everything except publishing)"
+        description: "Build and publish a release (unchecked: run everything except publishing)"
         type: boolean
         default: false
+      version:
+        description: "Version to release, e.g. 0.1.2 (empty: LAUNCHER_VERSION from launcher/src/config.h)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: write          # the tag, the release and its assets
@@ -63,20 +69,45 @@ jobs:
 
       - name: Publish on a manual run
         # The action reads the commit list of a push, which a manual run does not carry, so this path publishes with
-        # the gh CLI instead: the launcher's own version, the matching CHANGELOG section, and the same tag form.
+        # the gh CLI from the `version` input. Every check runs before anything is created, so a version that cannot
+        # be released fails here with one clear line instead of a half-made release or a 422 from the API.
         id: manual
         if: github.event_name == 'workflow_dispatch'
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          VER=$(sed -n 's/^#define LAUNCHER_VERSION *"\(.*\)"/\1/p' launcher/src/config.h)
-          if [ -z "$VER" ]; then echo "no LAUNCHER_VERSION in launcher/src/config.h"; exit 1; fi
-          awk -v pat="v$VER" '/^## /{inside = index($0, pat) > 0; if (inside) next} inside' CHANGELOG.md > notes.md
-          if [ ! -s notes.md ]; then echo "CHANGELOG.md has no '## v$VER' section"; exit 1; fi
-          if gh release view "v$VER" --json tagName >/dev/null 2>&1; then
-            gh release edit "v$VER" --title "Gow2HD-Windows $VER" --notes-file notes.md   # exists: refresh it
-          else
-            gh release create "v$VER" --title "Gow2HD-Windows $VER" --notes-file notes.md
+          BUILT=$(sed -n 's/^#define LAUNCHER_VERSION *"\(.*\)"/\1/p' launcher/src/config.h)
+          VER="${INPUT_VERSION#v}"                       # accept "0.1.2" and "v0.1.2"
+          if [ -z "$VER" ]; then VER="$BUILT"; fi
+          if [ -z "$VER" ]; then
+            echo "::error::no version to release: set the version input or LAUNCHER_VERSION in launcher/src/config.h"
+            exit 1
           fi
+          if ! printf '%s' "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VER' is not a version like 0.1.2"
+            exit 1
+          fi
+          if [ "$VER" != "$BUILT" ]; then
+            echo "::error::v$VER cannot be released from this commit: the exe reports $BUILT (LAUNCHER_VERSION in"
+            echo "launcher/src/config.h). Bump that constant, commit it, and run again -- otherwise the tag, the"
+            echo "update check and the exe would disagree."
+            exit 1
+          fi
+          if gh release view "v$VER" >/dev/null 2>&1; then
+            echo "::error::release v$VER already exists (https://github.com/${{ github.repository }}/releases/tag/v$VER). Bump LAUNCHER_VERSION to the next version instead of publishing this one again."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VER" >/dev/null 2>&1; then
+            echo "::error::tag v$VER already exists on origin without a release pointing at it; delete it or pick another version."
+            exit 1
+          fi
+          awk -v v="v$VER" '/^## /{inside = ($2 == v); if (inside) next} inside' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no '## v$VER' section; write the release notes for v$VER first."
+            exit 1
+          fi
+          gh release create "v$VER" --title "Gow2HD-Windows $VER" --notes-file notes.md
           echo "released=true" >> "$GITHUB_OUTPUT"
           echo "tag=v$VER" >> "$GITHUB_OUTPUT"
 
