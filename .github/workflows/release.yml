@@ -1,0 +1,51 @@
+# Creates a GitHub release when the pushed commit message carries a version, as described at
+# https://github.com/marketplace/actions/auto-release. The release notes are taken from CHANGELOG.md, so the section
+# for that version has to be committed before (or with) the release commit, for example
+# "Gow2HD-Windows v0.1.1: ..." next to a "## v0.1.1" entry in CHANGELOG.md.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Create the release for the head commit (unchecked: run everything except publishing)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write          # the action creates the tag and the release
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # A push is decided by the commit message pattern; a manual run only publishes when the input says so.
+    if: github.event_name == 'push' || inputs.publish
+    env:
+      # One token for the whole job. The auto-release action reads GITHUB_TOKEN and fails with
+      # "The GITHUB_TOKEN environment variable was not set" without it; the gh CLI reads the very same variable,
+      # so GH_TOKEN is deliberately not set here (two names for one value is what goes stale).
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Release when the commit message has a version
+        id: release
+        uses: CupOfTea696/gh-action-auto-release@v1.0.2
+        with:
+          title: "Gow2HD-Windows $semver"
+          tag: "v$semver"
+          draft: false
+          changelog: CHANGELOG.md
+          changelog-entry: "$version"
+          # `regex` is left at the action's default: any version string such as "v0.1.1", surrounded by
+          # whitespace, punctuation or the ends of the commit message. Set it to something narrower (e.g.
+          # '/^Gow2HD-Windows v(?<semver>\\d+\\.\\d+\\.\\d+):/') to release only on your own wording.
+
+      - name: Confirm the release with the gh CLI
+        # Authenticates with the same GITHUB_TOKEN: no extra login, no GH_TOKEN.
+        if: steps.release.outputs.released == 'true'
+        run: |
+          gh api "repos/${{ github.repository }}/releases/${{ steps.release.outputs.id }}" \
+            --jq '"released " + .tag_name + " -> " + .html_url'
