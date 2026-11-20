@@ -140,7 +140,7 @@ struct InstallPaths {
     void Init(const wstr& installDir);
 };
 wstr DefaultInstallDir();
-wstr LoadInstallDir();               // HKCU, else default (the launcher's own folder when it is an install)
+wstr LoadInstallDir();               // launcher.ini next to the exe, else default (the launcher's own folder when it is an install)
 bool IsInstallDir(const wstr& dir);  // holds launcher_state.ini or build_info.json
 wstr LostInstallDir();               // the remembered install that is gone (empty = nothing to recover)
 void SaveInstallDir(const wstr& dir);

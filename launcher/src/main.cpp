@@ -675,12 +675,9 @@ static void OnCommand(int id) {
     }
     case ID_BR_ELF: { wstr p; if (PickPath(false, L"Pick a decrypted EBOOT.ELF (optional)", L"ELF (*.elf)", L"*.elf", p)) { SetText(g_edElf, p); Validate(); } break; }
     case ID_BR_INSTALL: {
+        // Build where the player pointed: no "GoW2-Windows" subfolder inside the chosen folder.
         wstr p;
-        if (PickPath(true, L"Pick the install folder", nullptr, nullptr, p)) {
-            if (!IEquals(FileNameOf(p), L"GoW2-Windows") && !IsInstallDir(p) && !ListDir(p, false).empty())
-                p = JoinPath(p, L"GoW2-Windows");    // never build into a folder full of the player's files
-            SetText(g_edInstall, p); Validate();
-        }
+        if (PickPath(true, L"Pick the install folder", nullptr, nullptr, p)) { SetText(g_edInstall, p); Validate(); }
         break;
     }
     case ID_RESCAN: SetText(g_edGame, L""); SetText(g_edRap, L""); SetText(g_edElf, L""); StartDetect(); break;

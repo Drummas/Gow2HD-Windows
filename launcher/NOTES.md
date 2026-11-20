@@ -123,13 +123,15 @@ folder, and these environment variables are set: `PYTHONUNBUFFERED=1`, `PYTHONIO
 
 ## Install folder contents
 
-`%LOCALAPPDATA%\GoW2-Windows` by default (stored in `HKCU\Software\GoW2-Windows\InstallDir`; that is the only registry
-value). The folder the launcher itself runs from wins when it is an install (it has `launcher_state.ini` or
-`build_info.json`) and the remembered path is corrected to it, so renaming or moving the install folder keeps working:
+`%LOCALAPPDATA%\GoW2-Windows` by default. Nothing is written to the registry: the remembered path lives in
+`launcher.ini` next to the exe (`install_dir=`), so the launcher and its settings travel with the folder and deleting
+the folder leaves nothing behind on the machine. The folder the launcher itself runs from wins when it is an install
+(it has `launcher_state.ini` or `build_info.json`) and the remembered path is corrected to it, so renaming or moving
+the install folder keeps working:
 paths in `launcher_state.ini` and in `gow2_port.ini` are stored relative to it for the same reason. When the launcher
 does not run from its install (download-and-run) and the remembered folder is gone, it says so at start and offers a
 folder picker; the picked folder is remembered. Declining or cancelling the picker forgets the remembered folder
-(`HKCU\Software\GoW2-Windows\InstallDir` is deleted) and starts at the default folder instead, so no stale path is left
+(`install_dir=` in `launcher.ini` is cleared) and starts at the default folder instead, so no stale path is left
 in the INSTALL field, the home page or `g_ip`, and the next start is a plain first run rather than another prompt about
 a folder the player already said is not coming back.
 
@@ -138,6 +140,8 @@ a folder the player already said is not coming back.
 - `downloads\` holds `*.part` files (resumable; deleted after extraction).
 - `build.log` and `build.prev.log`.
 - `launcher_state.ini` holds game, rap, elf, built, exe, built_at, launcher_version and autoplay.
+- `launcher.ini` (next to the exe) holds `install_dir`: the install folder used last, so a launcher kept outside its
+  install still finds it. Deleting the install folder removes it with everything else.
 - The build output (whatever build.py writes to `--out`).
 
 **Remove build** (home menu, or `--remove-build [--install D] [--yes]` on the command line, which is a dry run without
@@ -242,7 +246,7 @@ Exit codes for `--silent-build`:
 - GUI Cancel kills python and its child.
 - Killing the launcher kills the build (job object).
 
-The tests save and restore the registry value.
+The tests save and restore `launcher.ini` next to the exe.
 
 `test\shots.ps1` captures every page with PrintWindow into `shots\`.
 

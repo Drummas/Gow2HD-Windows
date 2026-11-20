@@ -7,7 +7,8 @@ $root = Split-Path $PSScriptRoot -Parent
 $exe = Join-Path $root "build\Gow2HD-Windows.exe"
 $inst = Join-Path $Work "inst"
 $script:fails = 0
-$regBackup = (Get-ItemProperty -Path HKCU:\Software\GoW2-Windows -Name InstallDir -ErrorAction SilentlyContinue).InstallDir
+$iniPath = Join-Path (Split-Path $exe -Parent) "launcher.ini"
+$iniBackup = if (Test-Path $iniPath) { [IO.File]::ReadAllBytes($iniPath) } else { $null }
 
 function Check([string]$name, [bool]$ok, [string]$detail = "") {
   if ($ok) { "PASS  $name" } else { "FAIL  $name  $detail"; $script:fails++ }
@@ -30,6 +31,7 @@ $r = Silent @('--jobs', '2')
 Check "silent build succeeds" ($r.code -eq 0) $r.text
 Check "python sha256 verified" ($r.text -match "Python verified: sha256 4acbed6d" -or $r.text -notmatch "Downloading Python")
 Check "EXE line honoured" ((Get-Content "$inst\launcher_state.ini" -Raw) -match "exe=.*gow2.exe")
+Check "install folder remembered in launcher.ini" ((Get-Content $iniPath -Raw) -match [regex]::Escape($inst))
 
 # 2. rebuild reuses tools
 $r = Silent @()
@@ -123,8 +125,8 @@ Check "remove keeps settings, state, saves" ((Test-Path "$inst\port_settings.ini
                                              (Test-Path "$inst\movie_cache\saves_test\save.dat")) $o
 Check "state says not built" ((Get-Content "$inst\launcher_state.ini" -Raw) -match "built=0")
 
-# restore the registry value the tests changed
-if ($regBackup) { Set-ItemProperty HKCU:\Software\GoW2-Windows -Name InstallDir -Value $regBackup }
-else { Remove-Item HKCU:\Software\GoW2-Windows -Recurse -ErrorAction SilentlyContinue }
+# restore launcher.ini next to the exe (the tests build into $inst, which the launcher remembers there)
+if ($null -ne $iniBackup) { [IO.File]::WriteAllBytes($iniPath, $iniBackup) }
+else { Remove-Item $iniPath -ErrorAction SilentlyContinue }
 "--- $script:fails failure(s)"
 exit $script:fails

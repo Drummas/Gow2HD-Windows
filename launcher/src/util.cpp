@@ -883,25 +883,29 @@ void InstallPaths::Init(const wstr& installDir) {
 }
 wstr DefaultInstallDir() { return JoinPath(KnownFolder(FOLDERID_LocalAppData), L"GoW2-Windows"); }
 // A folder that holds a launcher install: its state file, or the build output it wrote, is there. The launcher travels
-// with its install, so this is how a renamed or moved install is recognised over the path remembered in HKCU.
+// with its install, so this is how a renamed or moved install is recognised over the path remembered in launcher.ini.
 bool IsInstallDir(const wstr& dir) {
     return !dir.empty() &&
            (FileExists(JoinPath(dir, L"launcher_state.ini")) || FileExists(JoinPath(dir, L"build_info.json")));
 }
 static wstr s_lostInstall;      // remembered install folder that is gone (empty: nothing to recover)
 wstr LostInstallDir() { return s_lostInstall; }
-// HKCU's InstallDir: written when a folder is chosen for a build, so its presence means this launcher was set up before.
-static bool RegistryInstallDir(wstr& out) {
-    wchar_t buf[MAX_PATH * 2]; DWORD n = sizeof(buf);
-    if (RegGetValueW(HKEY_CURRENT_USER, REG_KEY, L"InstallDir", RRF_RT_REG_SZ, nullptr, buf, &n) == ERROR_SUCCESS && buf[0]) {
-        out = buf;
-        return true;
-    }
-    return false;
+// The remembered install folder lives in launcher.ini next to the exe (install_dir=), never in the registry: the
+// launcher and its settings travel together, so copying or moving the folder keeps working and deleting it leaves
+// nothing behind on the machine. Normally the exe's own folder is the install (see LoadInstallDir); this file is what
+// a launcher kept outside its install (download and run, another launcher's app folder) starts from.
+static wstr LauncherIniPath() { return JoinPath(ExeDir(), LAUNCHER_INI_NAME); }
+static bool IniInstallDir(wstr& out) {
+    KvFile k;
+    if (!k.Load(LauncherIniPath())) return false;
+    std::string v = k.Get("install_dir");
+    if (v.empty()) return false;
+    out = Widen(v);
+    return true;
 }
 wstr LoadInstallDir() {
     wstr saved;
-    bool remembered = RegistryInstallDir(saved);
+    bool remembered = IniInstallDir(saved);
     s_lostInstall.clear();
     // The exe lives in its install folder, so that folder survives a rename either way; when it is an install it wins
     // and the stale remembered path is corrected, so the next run (and --remove-build from a shell) agrees.
@@ -917,15 +921,14 @@ wstr LoadInstallDir() {
     return saved;
 }
 void SaveInstallDir(const wstr& dir) {
-    HKEY k;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS) return;
-    RegSetValueExW(k, L"InstallDir", 0, REG_SZ, (const BYTE*)dir.c_str(), (DWORD)((dir.size() + 1) * sizeof(wchar_t)));
-    RegCloseKey(k);
+    KvFile k; k.Load(LauncherIniPath());    // keeps anything else the file holds
+    k.Set("install_dir", Narrow(dir));
+    k.Save(LauncherIniPath());              // best effort: a read-only exe folder is not an error here
 }
 void ForgetInstallDir() {
     s_lostInstall.clear();                  // nothing is left to recover, here or later in this run
-    HKEY k;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_SET_VALUE, &k) != ERROR_SUCCESS) return;
-    RegDeleteValueW(k, L"InstallDir");      // best effort: nothing to forget is not an error
-    RegCloseKey(k);
+    KvFile k;
+    if (!k.Load(LauncherIniPath())) return;
+    k.Set("install_dir", "");               // best effort: nothing to forget is not an error
+    k.Save(LauncherIniPath());
 }

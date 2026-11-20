@@ -43,4 +43,7 @@
 #define SCRIPTS_SHA256        ""
 #endif
 
-#define REG_KEY               L"Software\\GoW2-Windows"
+// The launcher's own settings file, next to the exe. It holds install_dir: the install folder used last, so a launcher
+// kept outside its install (download and run) still finds it. Nothing is written to the registry, so an install is
+// portable and deleting its folder leaves nothing behind on the machine.
+#define LAUNCHER_INI_NAME     L"launcher.ini"
