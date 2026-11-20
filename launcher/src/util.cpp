@@ -90,6 +90,42 @@ wstr FullPath(const wstr& p) {
     while (r.size() > 3 && (r.back() == L'\\' || r.back() == L'/')) r.pop_back();
     return r;
 }
+// ---------------------------------------------------------------- stored paths
+// launcher_state.ini records the player's game folder, licence and ELF and the built game exe (and build.py records
+// vfs_root the same way): a path inside the install folder is stored relative to it, so renaming or moving the install
+// keeps working; a path outside it stays as it is (there is no relative form that survives a move). Reading applies the
+// reverse, with the install root as the base.
+bool IsAbsPath(const wstr& p) {
+    return p.size() > 1 && (p[1] == L':' || (p[0] == L'\\' && p[1] == L'\\'));
+}
+static std::vector<wstr> PathParts(const wstr& p) {
+    std::vector<wstr> out;
+    wstr cur;
+    for (size_t i = 0; i <= p.size(); ++i) {
+        wchar_t c = i < p.size() ? p[i] : L'\\';
+        if (c == L'\\' || c == L'/') {
+            if (!cur.empty()) { out.push_back(cur); cur.clear(); }
+        } else cur.push_back(c);
+    }
+    return out;
+}
+wstr RelativeTo(const wstr& base, const wstr& p) {
+    if (base.empty() || p.empty()) return wstr();
+    std::vector<wstr> b = PathParts(FullPath(base)), f = PathParts(FullPath(p));
+    if (b.empty() || f.size() <= b.size()) return wstr();     // equal or in a parent: nothing portable to store
+    for (size_t i = 0; i < b.size(); ++i) if (!IEquals(b[i], f[i])) return wstr();
+    wstr r;
+    for (size_t i = b.size(); i < f.size(); ++i) { if (!r.empty()) r += L'\\'; r += f[i]; }
+    return r;
+}
+wstr StorePath(const wstr& base, const wstr& p) {
+    wstr r = RelativeTo(base, p);
+    return r.empty() ? p : r;
+}
+wstr LoadPath(const wstr& base, const wstr& p) {
+    if (p.empty() || IsAbsPath(p)) return p;
+    return JoinPath(base, p);
+}
 wstr ExePath() {
     wchar_t buf[MAX_PATH * 4];
     DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH * 4);
@@ -846,15 +882,50 @@ void InstallPaths::Init(const wstr& installDir) {
     state = JoinPath(root, L"launcher_state.ini");
 }
 wstr DefaultInstallDir() { return JoinPath(KnownFolder(FOLDERID_LocalAppData), L"GoW2-Windows"); }
-wstr LoadInstallDir() {
+// A folder that holds a launcher install: its state file, or the build output it wrote, is there. The launcher travels
+// with its install, so this is how a renamed or moved install is recognised over the path remembered in HKCU.
+bool IsInstallDir(const wstr& dir) {
+    return !dir.empty() &&
+           (FileExists(JoinPath(dir, L"launcher_state.ini")) || FileExists(JoinPath(dir, L"build_info.json")));
+}
+static wstr s_lostInstall;      // remembered install folder that is gone (empty: nothing to recover)
+wstr LostInstallDir() { return s_lostInstall; }
+// HKCU's InstallDir: written when a folder is chosen for a build, so its presence means this launcher was set up before.
+static bool RegistryInstallDir(wstr& out) {
     wchar_t buf[MAX_PATH * 2]; DWORD n = sizeof(buf);
-    if (RegGetValueW(HKEY_CURRENT_USER, REG_KEY, L"InstallDir", RRF_RT_REG_SZ, nullptr, buf, &n) == ERROR_SUCCESS && buf[0])
-        return buf;
-    return DefaultInstallDir();
+    if (RegGetValueW(HKEY_CURRENT_USER, REG_KEY, L"InstallDir", RRF_RT_REG_SZ, nullptr, buf, &n) == ERROR_SUCCESS && buf[0]) {
+        out = buf;
+        return true;
+    }
+    return false;
+}
+wstr LoadInstallDir() {
+    wstr saved;
+    bool remembered = RegistryInstallDir(saved);
+    s_lostInstall.clear();
+    // The exe lives in its install folder, so that folder survives a rename either way; when it is an install it wins
+    // and the stale remembered path is corrected, so the next run (and --remove-build from a shell) agrees.
+    wstr here = ExeDir();
+    if (IsInstallDir(here)) {
+        if (!IEquals(FullPath(here), FullPath(saved))) SaveInstallDir(here);
+        return here;
+    }
+    if (!remembered) return DefaultInstallDir();          // first run: nothing was set up yet, nothing to recover
+    // Remembered, but the folder is gone and the launcher does not run from it (download-and-run): callers can ask the
+    // player where it went instead of showing an empty setup page as if the build had been deleted.
+    if (!DirExists(saved)) s_lostInstall = saved;
+    return saved;
 }
 void SaveInstallDir(const wstr& dir) {
     HKEY k;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS) return;
     RegSetValueExW(k, L"InstallDir", 0, REG_SZ, (const BYTE*)dir.c_str(), (DWORD)((dir.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(k);
+}
+void ForgetInstallDir() {
+    s_lostInstall.clear();                  // nothing is left to recover, here or later in this run
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_SET_VALUE, &k) != ERROR_SUCCESS) return;
+    RegDeleteValueW(k, L"InstallDir");      // best effort: nothing to forget is not an error
     RegCloseKey(k);
 }

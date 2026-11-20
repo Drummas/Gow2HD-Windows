@@ -94,7 +94,14 @@ folder, and these environment variables are set: `PYTHONUNBUFFERED=1`, `PYTHONIO
 ## Install folder contents
 
 `%LOCALAPPDATA%\GoW2-Windows` by default (stored in `HKCU\Software\GoW2-Windows\InstallDir`; that is the only registry
-value):
+value). The folder the launcher itself runs from wins when it is an install (it has `launcher_state.ini` or
+`build_info.json`) and the remembered path is corrected to it, so renaming or moving the install folder keeps working:
+paths in `launcher_state.ini` and in `gow2_port.ini` are stored relative to it for the same reason. When the launcher
+does not run from its install (download-and-run) and the remembered folder is gone, it says so at start and offers a
+folder picker; the picked folder is remembered. Declining or cancelling the picker forgets the remembered folder
+(`HKCU\Software\GoW2-Windows\InstallDir` is deleted) and starts at the default folder instead, so no stale path is left
+in the INSTALL field, the home page or `g_ip`, and the next start is a plain first run rather than another prompt about
+a folder the player already said is not coming back.
 
 - `tools\` holds `python\` and the tool folders, plus `.stamps\`.
 - `scripts\` holds the extracted bundled scripts and `.bundle.sha256`.

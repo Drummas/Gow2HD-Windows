@@ -407,7 +407,7 @@ static void PaintHome(HDC dc) {
     bool stale = st.Get("launcher_version") != LAUNCHER_VERSION;
     info(L"STATUS", stale ? L"Built by launcher " + st.GetW("launcher_version") + L"  \u00B7  a rebuild is recommended"
                           : L"Ready  \u00B7  built " + st.GetW("built_at"));
-    info(L"GAME", st.GetW("game"));
+    info(L"GAME", LoadPath(g_ip.root, st.GetW("game")));
     info(L"INSTALLED IN", g_ip.root);
     int cap = ini.GetInt("fps_cap", DEF_FPS_CAP);
     info(L"DISPLAY", CapLabel(cap) + (ini.GetInt("borderless", DEF_BORDERLESS) ? L"  \u00B7  borderless" : L"  \u00B7  windowed") +
@@ -500,7 +500,7 @@ static void Validate() {
     if (inst.empty()) g_fsInstall = { 3, L"Pick a folder." };
     else {
         uint64_t freeB = FreeSpace(inst);
-        bool already = FileExists(JoinPath(inst, L"launcher_state.ini"));
+        bool already = IsInstallDir(inst);        // built here before: its state or build output is still there
         // from a package the extracted game files (7 GB) live in the install folder too, and must stay: the game
         // reads gow2.psarc from there while it runs (no "delete after build" option for that reason)
         uint64_t need = REQUIRED_BYTES + (isPkg ? PKG_EXTRA_BYTES : 0);
@@ -627,8 +627,9 @@ static void OnCommand(int id) {
     case ID_ABOUT: Go(PG_ABOUT); break;
     case ID_REBUILD: {
         KvFile st; st.Load(g_ip.state);
-        SetText(g_edGame, st.GetW("game")); SetText(g_edRap, st.GetW("rap"));
-        SetText(g_edElf, st.GetW("elf")); SetText(g_edInstall, g_ip.root);
+        SetText(g_edGame, LoadPath(g_ip.root, st.GetW("game")));
+        SetText(g_edRap, LoadPath(g_ip.root, st.GetW("rap")));
+        SetText(g_edElf, LoadPath(g_ip.root, st.GetW("elf"))); SetText(g_edInstall, g_ip.root);
         Go(PG_SETUP); Validate();
         break;
     }
@@ -648,8 +649,9 @@ static void OnCommand(int id) {
         SetCursor(old);
         if (bad) MessageBoxW(g_hwnd, (L"Some files could not be removed (is the game still running?)\n\n" + err).c_str(), L"Gow2HD-Windows", MB_ICONWARNING);
         KvFile st; st.Load(g_ip.state);
-        SetText(g_edGame, st.GetW("game")); SetText(g_edRap, st.GetW("rap"));
-        SetText(g_edElf, st.GetW("elf")); SetText(g_edInstall, g_ip.root);
+        SetText(g_edGame, LoadPath(g_ip.root, st.GetW("game")));
+        SetText(g_edRap, LoadPath(g_ip.root, st.GetW("rap")));
+        SetText(g_edElf, LoadPath(g_ip.root, st.GetW("elf"))); SetText(g_edInstall, g_ip.root);
         Go(PG_SETUP); Validate();
         break;
     }
@@ -675,7 +677,7 @@ static void OnCommand(int id) {
     case ID_BR_INSTALL: {
         wstr p;
         if (PickPath(true, L"Pick the install folder", nullptr, nullptr, p)) {
-            if (!IEquals(FileNameOf(p), L"GoW2-Windows") && !FileExists(JoinPath(p, L"launcher_state.ini")) && !ListDir(p, false).empty())
+            if (!IEquals(FileNameOf(p), L"GoW2-Windows") && !IsInstallDir(p) && !ListDir(p, false).empty())
                 p = JoinPath(p, L"GoW2-Windows");    // never build into a folder full of the player's files
             SetText(g_edInstall, p); Validate();
         }
@@ -992,7 +994,50 @@ static int DetectCmd(const wstr& hint) {
     if (!d.game.empty()) { GameCheck g = CheckGameInput(d.game); ConPrint(L"check=" + g.message); }
     InstallPaths ip; ip.Init(LoadInstallDir());
     ConPrint(L"install=" + ip.root + Fmt(L" built=%d", IsBuilt(ip) ? 1 : 0));
+    wstr lost = LostInstallDir();
+    if (!lost.empty()) ConPrint(L"install-missing=" + lost);
     return d.game.empty() || d.rap.empty() ? 1 : 0;
+}
+
+// Not recovering the moved install: forget it, so no stale root can surface again (setup page, home page, the next
+// start) and the player is not asked about the same folder every time. The launcher then starts at the default folder,
+// as on a first run, with the INSTALL field free for the real one.
+static void AbandonMissingInstall() {
+    ForgetInstallDir();
+    g_ip.Init(DefaultInstallDir());
+}
+// The remembered install folder is gone (renamed or moved) while the launcher runs from somewhere else -- the
+// download-and-run flow, where nothing else points at the new path. Ask the player to point at it and remember the
+// answer, instead of showing the setup page as if the build had been deleted.
+static bool RecoverMissingInstall() {
+    wstr lost = LostInstallDir();
+    if (lost.empty()) return false;
+    wstr msg = L"The launcher's install folder is no longer there:\n\n" + lost +
+               L"\n\nIt was renamed or moved. Point at the folder now?\n\n"
+               L"No: the launcher forgets it and starts at the default install folder; pick the real one there.";
+    if (MessageBoxW(nullptr, msg.c_str(), L"Gow2HD-Windows", MB_YESNO | MB_ICONQUESTION) != IDYES) {
+        AbandonMissingInstall();
+        return false;
+    }
+    // One pick: a folder that is not an install is reported and the player finishes on the setup page, where the
+    // INSTALL field takes any folder without another modal round trip.
+    wstr picked;
+    if (PickPath(true, L"Pick the GoW2HD-Windows install folder (its launcher_state.ini or build_info.json is there)",
+                 nullptr, nullptr, picked)) {
+        InstallPaths ip;
+        ip.Init(picked);
+        if (IsInstallDir(ip.root)) {
+            g_ip = ip;
+            SaveInstallDir(g_ip.root);                 // the remembered path is now correct again
+            return true;
+        }
+        MessageBoxW(nullptr, (L"That folder is not a GoW2HD-Windows install:\n\n" + ip.root +
+                              L"\n\nIt has no launcher_state.ini and no build_info.json. Pick the folder that holds the "
+                              L"build in the INSTALL field on the setup page.").c_str(),
+                    L"Gow2HD-Windows", MB_OK | MB_ICONWARNING);
+    }
+    AbandonMissingInstall();
+    return false;
 }
 
 // ================================================================ entry
@@ -1030,6 +1075,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     if (removeBuild) {   // console: prints the plan; deletes only with --yes
         ConOpen();
         InstallPaths ip; ip.Init(req.install.empty() ? LoadInstallDir() : FullPath(req.install));
+        wstr lost = req.install.empty() ? LostInstallDir() : wstr();
+        if (!lost.empty()) ConPrint(L"install folder not found: " + lost + L" (renamed or moved? pass --install <dir>)");
         RemovePlan plan = PlanRemoveBuild(ip);
         for (auto& d : plan.dirs) ConPrint(L"delete dir  " + d);
         for (auto& f : plan.files) ConPrint(L"delete file " + f);
@@ -1053,6 +1100,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     }
 
     g_ip.Init(req.install.empty() ? LoadInstallDir() : req.install);
+    if (req.install.empty()) RecoverMissingInstall();   // a moved install the launcher cannot find by itself
     bool built = IsBuilt(g_ip);
     KvFile st; st.Load(g_ip.state);
     bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -1091,9 +1139,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     if (page == L"settings" && built) start = PG_SETTINGS;
     if (page == L"about") start = PG_ABOUT;
     if (start == PG_SETUP && built) {
-        SetText(g_edGame, req.game.empty() ? st.GetW("game") : req.game);
-        SetText(g_edRap, req.rap.empty() ? st.GetW("rap") : req.rap);
-        SetText(g_edElf, st.GetW("elf"));
+        SetText(g_edGame, req.game.empty() ? LoadPath(g_ip.root, st.GetW("game")) : req.game);
+        SetText(g_edRap, req.rap.empty() ? LoadPath(g_ip.root, st.GetW("rap")) : req.rap);
+        SetText(g_edElf, LoadPath(g_ip.root, st.GetW("elf")));
     }
     Go(start);
     ShowWindow(h, show);

@@ -221,7 +221,10 @@ int RunBuildPipeline(const BuildRequest& req, const BuildEvents& ev, std::atomic
 
     KvFile st; st.Load(c.ip.state);
     st.Set("built", "0");
-    st.SetW("game", req.game); st.SetW("rap", req.rap); st.SetW("elf", req.elf);
+    // stored relative to the install when the file/folder lives inside it (see StorePath), so a renamed or moved
+    // install does not make the launcher claim the build moved
+    st.SetW("game", StorePath(c.ip.root, req.game)); st.SetW("rap", StorePath(c.ip.root, req.rap));
+    st.SetW("elf", StorePath(c.ip.root, req.elf));
     st.Save(c.ip.state);
 
     GameCheck g = CheckGameInput(req.game);
@@ -283,13 +286,13 @@ int RunBuildPipeline(const BuildRequest& req, const BuildEvents& ev, std::atomic
     }
     if (!builtExe.empty() && !(builtExe.size() > 1 && builtExe[1] == L':')) builtExe = JoinPath(c.ip.root, builtExe);
     st.Load(c.ip.state);
-    if (!builtExe.empty()) st.SetW("exe", FullPath(builtExe));
+    if (!builtExe.empty()) st.SetW("exe", StorePath(c.ip.root, FullPath(builtExe)));
     wstr exe = FindBuiltExe(c.ip, st);
     if (exe.empty()) { err = L"The build finished but no game exe was found in " + c.ip.root; return fail(11); }
     now = time(nullptr);
     strftime(tbuf, 64, "%Y-%m-%d %H:%M", localtime(&now));
     st.Set("built", "1");
-    st.SetW("exe", exe);
+    st.SetW("exe", StorePath(c.ip.root, exe));    // relative when inside the install: a moved install still finds it
     st.Set("built_at", tbuf);
     st.Set("launcher_version", LAUNCHER_VERSION);
     st.Save(c.ip.state);
@@ -304,7 +307,7 @@ static bool IsOurLauncher(const wstr& name) {
 }
 
 wstr FindBuiltExe(const InstallPaths& ip, const KvFile& state) {
-    wstr e = state.GetW("exe");
+    wstr e = LoadPath(ip.root, state.GetW("exe"));   // stored relative when it lies inside the install
     if (!e.empty() && FileExists(e)) return e;
     wstr best; uint64_t bestSize = 0;
     for (auto sub : { L"", L"bin", L"game", L"port" }) {
@@ -334,7 +337,7 @@ bool LaunchGame(const InstallPaths& ip, wstr& err) {
     wstr exe = FindBuiltExe(ip, st);
     if (exe.empty()) { err = L"The port is not built yet."; return false; }
     wstr exeDir = ParentDir(exe);
-    wstr game = st.GetW("game");
+    wstr game = LoadPath(ip.root, st.GetW("game"));
     if (IsPkgPath(game)) game = PkgGameDir(ip.root);   // built from a package: the game runs from the extracted files
     GameCheck g = CheckGameDir(game);
     if (g.status != GAME_OK) { err = L"The game folder is gone or changed:\n" + game + L"\n\n" + g.message; return false; }
@@ -412,12 +415,21 @@ RemovePlan PlanRemoveBuild(const InstallPaths& ip) {
     wstr exe = FindBuiltExe(ip, st);
     wstr exeDir = exe.empty() ? ip.root : ParentDir(exe);
     p.saveRoots = SaveRoots(exeDir);
+    // the player's own game folder, licence and ELF, relative values resolved against the install root: when the player
+    // keeps one of them inside the install, "remove build" must leave it alone (outside it, the plan never looks there)
+    std::vector<wstr> ownPaths;
+    for (const char* key : { "game", "rap", "elf" }) {
+        wstr own = LoadPath(ip.root, st.GetW(key));
+        if (!own.empty() && Within(own, ip.root)) ownPaths.push_back(own);
+    }
     // the game's checkpoints (F6 / Port Settings "Save Checkpoint": checkpoints\ next to the game exe) are the player's,
     // like the saves: never deleted
     const wstr ckpt = JoinPath(exeDir, L"checkpoints");
     auto safe = [&](const wstr& path) {      // never anything that holds saves or lies inside a save folder
         for (auto& s : p.saveRoots) if (Within(s, path) || Within(path, s)) return false;
         if (Within(ckpt, path) || Within(path, ckpt)) return false;   // nor the checkpoints
+        for (auto& own : ownPaths)                  // nor the player's game folder / licence / ELF kept inside
+            if (Within(own, path) || Within(path, own)) return false;
         return !Within(ExePath(), path);     // nor the running launcher (or a folder holding it)
     };
     // folders: the launcher's own (tools, scripts, downloads) and build.py's (.build, movie_cache, licenses)

@@ -42,6 +42,12 @@ wstr JoinPath(const wstr& a, const wstr& b);
 wstr ParentDir(const wstr& p);
 wstr FileNameOf(const wstr& p);
 wstr FullPath(const wstr& p);
+// Paths recorded in launcher_state.ini follow the same rule as build.py's files: a path inside the install folder is
+// stored relative to it (so renaming or moving the install keeps working), anything else is stored as given.
+bool IsAbsPath(const wstr& p);                     // "X:..." or UNC "\\\\server\\..."
+wstr RelativeTo(const wstr& base, const wstr& p);  // p inside base -> path below it, else empty
+wstr StorePath(const wstr& base, const wstr& p);   // what the state file records
+wstr LoadPath(const wstr& base, const wstr& p);    // a relative stored value resolved against base
 wstr ExePath();
 wstr ExeDir();
 wstr KnownFolder(REFKNOWNFOLDERID id);
@@ -134,8 +140,11 @@ struct InstallPaths {
     void Init(const wstr& installDir);
 };
 wstr DefaultInstallDir();
-wstr LoadInstallDir();               // HKCU, else default
+wstr LoadInstallDir();               // HKCU, else default (the launcher's own folder when it is an install)
+bool IsInstallDir(const wstr& dir);  // holds launcher_state.ini or build_info.json
+wstr LostInstallDir();               // the remembered install that is gone (empty = nothing to recover)
 void SaveInstallDir(const wstr& dir);
+void ForgetInstallDir();             // drop the remembered install (the player said the folder is not coming back)
 
 // ---------------------------------------------------------------- build pipeline (worker thread)
 struct BuildRequest {
