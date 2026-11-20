@@ -1,7 +1,11 @@
 #include <winres.h>
 
+// Build.cmd writes these two files from LAUNCHER_VERSION in src/config.h before windres runs, so the exe reports
+// the version it is actually built as. The manifest is the same as res/app.manifest, with the version filled in.
+#include "launcher_version.h"
+
 1 ICON "app.ico"
-1 24 "app.manifest"
+1 24 "launcher.manifest"
 
 // Build scripts (zip) are added by build.cmd as SCRIPTS RCDATA through a generated scripts.rc.
 #ifdef WITH_SCRIPTS
@@ -9,8 +13,8 @@
 #endif
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION LAUNCHER_VERSION_COMMA
+ PRODUCTVERSION LAUNCHER_VERSION_COMMA
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS 0x40004L
@@ -23,12 +27,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "sethlikepie"
             VALUE "FileDescription", "Gow2HD-Windows launcher (builds the port from your own copy)"
-            VALUE "FileVersion", "0.1.0"
+            VALUE "FileVersion", LAUNCHER_VERSION_STR
             VALUE "InternalName", "Gow2HD-Windows"
             VALUE "LegalCopyright", "MIT. Not affiliated with Sony Interactive Entertainment."
             VALUE "OriginalFilename", "Gow2HD-Windows.exe"
             VALUE "ProductName", "Gow2HD-Windows"
-            VALUE "ProductVersion", "0.1.0"
+            VALUE "ProductVersion", LAUNCHER_VERSION_STR
         END
     END
     BLOCK "VarFileInfo"

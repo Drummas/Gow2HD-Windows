@@ -1,6 +1,7 @@
 # Creates a GitHub release when a pushed commit message follows this convention, using
-# https://github.com/marketplace/actions/auto-release, then builds the launcher on a Windows runner and attaches
-# Gow2HD-Windows.exe and its .sha256 to that release. Release notes come from CHANGELOG.md.
+# https://github.com/marketplace/actions/auto-release. The launcher is built, checked and scanned on a Windows
+# runner FIRST; the release (with its notes) is created only after that succeeded, and the exe and its sha256 are
+# attached right away. A release therefore never appears without its exe: if the build fails, nothing is published.
 #
 # Convention -- the release commit's subject starts with "Release: vX.Y.Z", for example
 #
@@ -12,12 +13,15 @@
 # including an ordinary commit that merely mentions a version, publishes nothing.
 #
 # A manual run (Actions -> Release -> Run workflow, "publish" ticked) releases the version given in the `version`
-# input -- the launcher version from launcher/src/config.h when it is left empty -- and then builds the exe. It
-# refuses, before creating anything, a version that is already tagged or released, a version the exe would not
-# report, and a version without its CHANGELOG section. The push path runs the same check on the pushed subjects
-# before the action touches the API, so pushing a second "Release: vX.Y.Z" fails with one clear line.
+# input -- the launcher version from launcher/src/config.h when it is left empty -- and builds the exe first as well.
+# It refuses, before anything is built or created, a version that is already tagged or released, a version the exe
+# would not report, and a version without its CHANGELOG section. The push path runs the same check on the pushed
+# subjects before anything is built, so pushing a second "Release: vX.Y.Z" fails with one clear line.
 #
 # The version, release and tag checks live in launcher/tools/release_check.sh, which both paths call.
+#
+# Jobs: check (ubuntu, version checks, seconds) -> build-windows (windows, build + scans) -> publish (ubuntu,
+# creates the release and attaches the built files). `check` decides whether the other two run at all.
 name: Release
 
 on:
@@ -39,23 +43,23 @@ permissions:
   contents: write          # the tag, the release and its assets
 
 jobs:
-  publish:
+  check:
+    # Before anything is built or created: a version that cannot be released fails in seconds with one clear line
+    # instead of after a Windows build. The `released` output is what lets the other two jobs run.
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || inputs.publish
     outputs:
-      released: ${{ steps.release.outputs.released || steps.manual.outputs.released }}
-      tag: ${{ steps.confirm.outputs.tag || steps.manual.outputs.tag }}
+      released: ${{ steps.precheck.outputs.released || steps.manual.outputs.released }}
+      version: ${{ steps.manual.outputs.version }}
     env:
-      # One token for the whole job. The auto-release action reads GITHUB_TOKEN and fails with
-      # "The GITHUB_TOKEN environment variable was not set" without it; the gh CLI reads the very same variable,
-      # so GH_TOKEN is deliberately not set here (two names for one value is what goes stale).
+      # release_check.sh asks gh whether the release and the tag already exist.
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Check the version before anything is created
-        # The action would otherwise send the tag to the API and fail there with a 422. This reads the same subjects
-        # the action will match and runs launcher/tools/release_check.sh on each version it finds.
+        # This reads the same subjects the action will match and runs launcher/tools/release_check.sh on each
+        # version it finds, so a tag that already exists fails here rather than at the API.
         id: precheck
         if: github.event_name == 'push'
         shell: bash
@@ -77,29 +81,12 @@ jobs:
             VER=$(printf '%s' "$subject" | grep -Eo '^[Rr]elease: v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | sed -E 's/^[Rr]elease: v//')
             bash launcher/tools/release_check.sh "$VER" push >/dev/null
           done < <(git log --format=%s "$RANGE")
+          echo "released=$([ "$found" = 1 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           if [ "$found" = 0 ]; then echo "no Release: vX.Y.Z subject in this push; nothing to check"; fi
 
-      - name: Release on a Release line
-        id: release
-        if: github.event_name == 'push'
-        uses: CupOfTea696/gh-action-auto-release@v1.0.2
-        with:
-          title: "Gow2HD-Windows $semver"
-          tag: "v$semver"
-          draft: false
-          changelog: CHANGELOG.md
-          changelog-entry: "$version"
-          # The convention above, as a JavaScript regex in /pattern/flags form (the action requires the slashes).
-          # `#{semver}` is replaced by the action's SemVer pattern and supplies $version / $semver, so this matches
-          # a commit message whose first line is "Release: v1.2.3" -- case-insensitive, with or without a body.
-          # `^` is anchored to the start of the message and nothing follows but whitespace or the end, so a version
-          # mentioned anywhere else ("fix the v1.2.3 download link") does not publish a release.
-          regex: '/^Release: #{semver}(?=\s|$)/i'
-
-      - name: Publish on a manual run
-        # The action reads the commit list of a push, which a manual run does not carry, so this path publishes with
-        # the gh CLI from the `version` input. release_check.sh runs first, so a version that cannot be released
-        # fails here with one clear line instead of a half-made release or a 422 from the API.
+      - name: Check the version on a manual run
+        # The version check and the release notes happen here, before the build, so the publish job later only
+        # creates the release. notes.md is passed on as an artifact.
         id: manual
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -112,27 +99,22 @@ jobs:
             echo "::error::CHANGELOG.md has no '## v$VER' section; write the release notes for v$VER first."
             exit 1
           fi
-          gh release create "v$VER" --title "Gow2HD-Windows $VER" --notes-file notes.md
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "released=true" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
 
-      - name: Confirm the release with the gh CLI
-        # Authenticates with the same GITHUB_TOKEN: no extra login, no GH_TOKEN. The tag it reads back is what the
-        # Windows job attaches the exe to.
-        id: confirm
-        if: steps.release.outputs.released == 'true'
-        run: |
-          set -euo pipefail
-          TAG=$(gh api "repos/${{ github.repository }}/releases/${{ steps.release.outputs.id }}" --jq .tag_name)
-          echo "released $TAG -> https://github.com/${{ github.repository }}/releases/tag/$TAG"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Keep the release notes for the publish job
+        if: github.event_name == 'workflow_dispatch' && steps.manual.outputs.released == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: notes.md
+          if-no-files-found: error
+          retention-days: 1
 
   build-windows:
-    needs: publish
-    if: needs.publish.outputs.released == 'true'
+    needs: check
+    if: needs.check.outputs.released == 'true'
     runs-on: windows-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}     # gh release upload, same single variable as above
     steps:
       - uses: actions/checkout@v4
 
@@ -183,12 +165,93 @@ jobs:
           python launcher\tools\scan_private.py launcher\build\Gow2HD-Windows.exe launcher\build\Gow2HD-Windows-scripts-src.zip
           if ($LASTEXITCODE -ne 0) { throw 'scan_private.py reported a hit' }
 
-      - name: Attach the exe and its checksum to the release
-        shell: pwsh
+      - name: Keep the build for the publish job
+        # Nothing is published if this job fails: the release job below only starts once the exe and its checksum
+        # exist and passed the two checks above.
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher
+          path: |
+            launcher\build\Gow2HD-Windows.exe
+            launcher\build\Gow2HD-Windows.exe.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [check, build-windows]
+    if: needs.check.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    env:
+      # One token for the whole job. The auto-release action reads GITHUB_TOKEN and fails with
+      # "The GITHUB_TOKEN environment variable was not set" without it; the gh CLI reads the very same variable,
+      # so GH_TOKEN is deliberately not set here (two names for one value is what goes stale).
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the built launcher
+        uses: actions/download-artifact@v4
+        with:
+          name: launcher
+          path: dist
+
+      - name: Fetch the release notes
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      - name: Release on a Release line
+        id: release
+        if: github.event_name == 'push'
+        uses: CupOfTea696/gh-action-auto-release@v1.0.2
+        with:
+          title: "Gow2HD-Windows $semver"
+          tag: "v$semver"
+          draft: false
+          changelog: CHANGELOG.md
+          changelog-entry: "$version"
+          # The convention above, as a JavaScript regex in /pattern/flags form (the action requires the slashes).
+          # `#{semver}` is replaced by the action's SemVer pattern and supplies $version / $semver, so this matches
+          # a commit message whose first line is "Release: v1.2.3" -- case-insensitive, with or without a body.
+          # `^` is anchored to the start of the message and nothing follows but whitespace or the end, so a version
+          # mentioned anywhere else ("fix the v1.2.3 download link") does not publish a release.
+          regex: '/^Release: #{semver}(?=\s|$)/i'
+
+      - name: Publish on a manual run
+        # The action reads the commit list of a push, which a manual run does not carry, so this path publishes with
+        # the gh CLI from the `version` output of the check job, using the notes it prepared (and the exe built in
+        # between). release_check.sh already ran there, so nothing can be created for a version that cannot be
+        # released.
+        id: manual
+        if: github.event_name == 'workflow_dispatch'
         env:
-          TAG: ${{ needs.publish.outputs.tag }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not $env:TAG) { throw 'the publish job did not report a release tag' }
-          gh release upload $env:TAG launcher\build\Gow2HD-Windows.exe launcher\build\Gow2HD-Windows.exe.sha256 --clobber
-          gh release view $env:TAG --json tagName,url,assets --jq '"assets of " + .tagName + ": " + ([.assets[].name] | join(", "))'
+          set -euo pipefail
+          VER="$VERSION"
+          gh release create "v$VER" --title "Gow2HD-Windows $VER" --notes-file notes.md
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm the release with the gh CLI
+        # Authenticates with the same GITHUB_TOKEN: no extra login, no GH_TOKEN. The tag it reads back is what the
+        # exe is attached to.
+        id: confirm
+        if: steps.release.outputs.released == 'true'
+        run: |
+          set -euo pipefail
+          TAG=$(gh api "repos/${{ github.repository }}/releases/${{ steps.release.outputs.id }}" --jq .tag_name)
+          echo "released $TAG -> https://github.com/${{ github.repository }}/releases/tag/$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Attach the exe and its checksum to the release
+        # The release is created above and the files already exist, so this is the last thing that can fail. If it
+        # does, the release is there with no assets and the run says so: re-run the job, the upload is idempotent.
+        if: steps.confirm.outputs.tag != '' || steps.manual.outputs.tag != ''
+        env:
+          TAG: ${{ steps.confirm.outputs.tag || steps.manual.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" dist/Gow2HD-Windows.exe dist/Gow2HD-Windows.exe.sha256 --clobber
+          gh release view "$TAG" --json tagName,url,assets --jq '"assets of " + .tagName + ": " + ([.assets[].name] | join(", "))'

@@ -16,10 +16,10 @@ or game-derived data. The icon is drawn by `tools/make_icon.py` from simple shap
 | `src/pipeline.cpp` | Build pipeline (scripts, then Python, then tools, then build.py), finding and launching the built exe |
 | `src/net.cpp` | WinHTTP downloads (resume and verify), child processes in a job object, extraction, update check |
 | `src/util.cpp` | Strings, files, key=value ini, PARAM.SFO reader, RPCS3/game/.rap detection, SHA-256 (BCrypt), small JSON parser |
-| `res/` | `app.rc`, `app.manifest` (PerMonitorV2, asInvoker), `app.ico`, `icon-256.png` (our own) |
+| `res/` | `app.rc`, `app.manifest` (PerMonitorV2, asInvoker), `app.ico`, `icon-256.png` (our own). The version in both is generated at build time (see below) |
 | `build.cmd` | Build script (CRLF) |
 | `test/` | Stub `build.py`, stub game, fake RPCS3 layout maker, `run_tests.ps1`, `shots.ps1`, Windows Sandbox test |
-| `tools/` | `pack_scripts.py` (deterministic zip of the build sources), `make_icon.py`, `shot.ps1` (PrintWindow capture), `scan_private.py` (release check for personal paths) |
+| `tools/` | `pack_scripts.py` (deterministic zip of the build sources), `version_header.py` (version resource from `LAUNCHER_VERSION`), `make_icon.py`, `shot.ps1` (PrintWindow capture), `scan_private.py` (release check for personal paths), `release_check.sh` (release version/tag checks) |
 | `shots/` | Review screenshots. **Git-ignored**: they show local paths. |
 
 ## Building the exe
@@ -40,6 +40,11 @@ build.cmd [release|stub] [bundled|download]
   it because of the `-src.zip` name.
 - `LLVM_MINGW` sets the toolchain path. The default is `..\tools-download\llvm-mingw` (the folder layout
   `build.py --print-tools` / `tools\fetch_tools.py tools-download` produce). `PYTHON` sets the Python used for packing.
+- The version the exe reports is not written down anywhere but `LAUNCHER_VERSION` in `src/config.h`: before
+  `windres` runs, `tools\version_header.py` writes `build\launcher_version.h` (`FILEVERSION`/`PRODUCTVERSION` and the
+  `FileVersion`/`ProductVersion` strings for `res/app.rc`) and `build\launcher.manifest` (`res/app.manifest` with the
+  assembly version filled in). Bumping the version is therefore one edit, and the exe cannot report another version
+  than the one it was built as.
 - Output: `build\Gow2HD-Windows.exe` and `build\Gow2HD-Windows.exe.sha256`.
 - Before a release, run `python tools\scan_private.py build\Gow2HD-Windows.exe build\Gow2HD-Windows-scripts-src.zip`.
 
@@ -50,19 +55,23 @@ A release is published by `.github/workflows/release.yml`, and only from a commi
 `CHANGELOG.md` — the body of that section becomes the release description, so it has to be written before the release
 commit. On such a push:
 
-- the `publish` job creates the tag `vX.Y.Z` and the release titled `Gow2HD-Windows x.y.z`;
-- the `build-windows` job runs `build.cmd release` on a Windows runner, scans the result and attaches
-  `Gow2HD-Windows.exe` and `Gow2HD-Windows.exe.sha256` to that release.
+- the `check` job settles the version first (with `tools/release_check.sh`) and decides whether anything happens
+  at all;
+- the `build-windows` job then runs `build.cmd release` on a Windows runner and scans the result, so a failed build
+  stops the release before it exists;
+- only after that does `publish` create the tag `vX.Y.Z` and the release titled `Gow2HD-Windows x.y.z`, and attach
+  `Gow2HD-Windows.exe` and `Gow2HD-Windows.exe.sha256` to it.
 
 Any other commit subject publishes nothing, even when it mentions a version. `LAUNCHER_VERSION` in `src/config.h` has
-to name the version being released: the tag, `SCRIPTS_URL` (download mode) and the update check all derive from it. To
-release by hand, run the workflow from the Actions tab with `publish` ticked and the `version` input filled in (empty
-means `LAUNCHER_VERSION`); it builds the exe as well. The manual run stops before creating anything, with a line per
-problem, when the version is not the one `src/config.h` reports, when its tag or release already exists on GitHub, or
-when `CHANGELOG.md` has no `## vX.Y.Z` section for it. The push path runs the same version, release and tag checks on
-the pushed commit subjects before the action touches the API, so pushing the same `Release: vX.Y.Z` a second time fails
-with that one clear line instead of an API error. Both paths call `tools/release_check.sh <version> <push|manual>`,
-which holds those three checks and their wording, so the two cannot drift apart.
+to name the version being released: the tag, `SCRIPTS_URL` (download mode), the update check and the exe's own file
+and product version all derive from it. To release by hand, run the workflow from the Actions tab with `publish`
+ticked and the `version` input filled in (empty means `LAUNCHER_VERSION`); it builds the exe as well. The manual run
+stops before anything is built or created, with a line per problem, when the version is not the one `src/config.h`
+reports, when its tag or release already exists on GitHub, or when `CHANGELOG.md` has no `## vX.Y.Z` section for it.
+The push path runs the same version, release and tag checks on the pushed commit subjects before anything is built,
+so pushing the same `Release: vX.Y.Z` a second time fails with that one clear line instead of a wasted Windows build
+or an API error. Both paths call `tools/release_check.sh <version> <push|manual>`, which holds those three checks and
+their wording, so the two cannot drift apart.
 
 ## Contract with build.py (for the builder agent)
 

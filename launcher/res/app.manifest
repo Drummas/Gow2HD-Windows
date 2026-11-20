@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!-- The version is filled in by tools/version_header.py from LAUNCHER_VERSION at build time; the value here is
+       ignored. -->
   <assemblyIdentity type="win32" name="sethlikepie.GoW2Windows.Launcher" version="0.1.0.0" processorArchitecture="amd64"/>
   <description>Gow2HD-Windows launcher</description>
   <dependency>

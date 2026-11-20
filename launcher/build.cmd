@@ -34,7 +34,7 @@ set "MODE=%~2"
 if "%MODE%"=="" set "MODE=bundled"
 echo scripts: %WHAT%   mode: %MODE%
 if not exist build mkdir build
-del /q build\Gow2HD-Windows-scripts-src.zip build\scripts.rc build\scripts_cfg.h build\app.res.o 2>nul
+del /q build\Gow2HD-Windows-scripts-src.zip build\scripts.rc build\scripts_cfg.h build\app.res.o build\launcher_version.h build\launcher.manifest 2>nul
 
 rem --- zip the build scripts (deterministic)
 if /i "%WHAT%"=="stub" (
@@ -55,6 +55,9 @@ if /i "%MODE%"=="download" (
   > build\scripts.rc echo SCRIPTS RCDATA "Gow2HD-Windows-scripts-src.zip"
   set "RCDEF=-DWITH_SCRIPTS"
 )
+
+rem --- version resource: FILEVERSION/PRODUCTVERSION and the manifest version, from LAUNCHER_VERSION in src\config.h
+%PYTHON% tools\version_header.py src\config.h res\app.manifest build || exit /b 1
 
 "%BIN%\x86_64-w64-mingw32-windres.exe" -I res -I build %RCDEF% res\app.rc -O coff -o build\app.res.o || exit /b 1
 
