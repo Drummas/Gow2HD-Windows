@@ -43,6 +43,22 @@ build.cmd [release|stub] [bundled|download]
 - Output: `build\Gow2HD-Windows.exe` and `build\Gow2HD-Windows.exe.sha256`.
 - Before a release, run `python tools\scan_private.py build\Gow2HD-Windows.exe build\Gow2HD-Windows-scripts-src.zip`.
 
+## Releasing
+
+A release is published by `.github/workflows/release.yml`, and only from a commit whose **subject starts with**
+`Release: vX.Y.Z` (for example `Release: v0.1.1`), pushed together with a matching `## vX.Y.Z` section in
+`CHANGELOG.md` — the body of that section becomes the release description, so it has to be written before the release
+commit. On such a push:
+
+- the `publish` job creates the tag `vX.Y.Z` and the release titled `Gow2HD-Windows x.y.z`;
+- the `build-windows` job runs `build.cmd release` on a Windows runner, scans the result and attaches
+  `Gow2HD-Windows.exe` and `Gow2HD-Windows.exe.sha256` to that release.
+
+Any other commit subject publishes nothing, even when it mentions a version. `LAUNCHER_VERSION` in `src/config.h` has
+to name the version being released: the tag, `SCRIPTS_URL` (download mode) and the update check all derive from it. To
+publish or refresh the release for the current `LAUNCHER_VERSION` by hand, run the workflow from the Actions tab with
+`publish` ticked; it builds the exe as well.
+
 ## Contract with build.py (for the builder agent)
 
 The launcher runs `tools\python\python.exe -u -X utf8 <scripts>\build.py ...`. The working directory is the scripts
