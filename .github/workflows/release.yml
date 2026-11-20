@@ -16,6 +16,8 @@
 # refuses, before creating anything, a version that is already tagged or released, a version the exe would not
 # report, and a version without its CHANGELOG section. The push path runs the same check on the pushed subjects
 # before the action touches the API, so pushing a second "Release: vX.Y.Z" fails with one clear line.
+#
+# The version, release and tag checks live in launcher/tools/release_check.sh, which both paths call.
 name: Release
 
 on:
@@ -53,14 +55,12 @@ jobs:
 
       - name: Check the version before anything is created
         # The action would otherwise send the tag to the API and fail there with a 422. This reads the same subjects
-        # the action will match and stops with the same message the manual run uses when the version is already
-        # tagged or released, or is not the version the exe will report.
+        # the action will match and runs launcher/tools/release_check.sh on each version it finds.
         id: precheck
         if: github.event_name == 'push'
         shell: bash
         run: |
           set -euo pipefail
-          BUILT=$(sed -n 's/^#define LAUNCHER_VERSION *"\(.*\)"/\1/p' launcher/src/config.h)
           BEFORE='${{ github.event.before }}'
           AFTER='${{ github.event.after }}'
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
@@ -75,25 +75,7 @@ jobs:
             fi
             found=1
             VER=$(printf '%s' "$subject" | grep -Eo '^[Rr]elease: v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | sed -E 's/^[Rr]elease: v//')
-            if [ -z "$BUILT" ]; then
-              echo "::error::no version to release: LAUNCHER_VERSION is missing from launcher/src/config.h"
-              exit 1
-            fi
-            if [ "$VER" != "$BUILT" ]; then
-              echo "::error::v$VER cannot be released from this commit: the exe reports $BUILT (LAUNCHER_VERSION in"
-              echo "launcher/src/config.h). Bump that constant, commit it, and push again -- otherwise the tag, the"
-              echo "update check and the exe would disagree."
-              exit 1
-            fi
-            if gh release view "v$VER" >/dev/null 2>&1; then
-              echo "::error::release v$VER already exists (https://github.com/${{ github.repository }}/releases/tag/v$VER). Bump LAUNCHER_VERSION to the next version instead of publishing this one again."
-              exit 1
-            fi
-            if git ls-remote --exit-code --tags origin "refs/tags/v$VER" >/dev/null 2>&1; then
-              echo "::error::tag v$VER already exists on origin without a release pointing at it; delete it or pick another version."
-              exit 1
-            fi
-            echo "v$VER is not tagged and not released: the action may publish it"
+            bash launcher/tools/release_check.sh "$VER" push >/dev/null
           done < <(git log --format=%s "$RANGE")
           if [ "$found" = 0 ]; then echo "no Release: vX.Y.Z subject in this push; nothing to check"; fi
 
@@ -116,39 +98,15 @@ jobs:
 
       - name: Publish on a manual run
         # The action reads the commit list of a push, which a manual run does not carry, so this path publishes with
-        # the gh CLI from the `version` input. Every check runs before anything is created, so a version that cannot
-        # be released fails here with one clear line instead of a half-made release or a 422 from the API.
+        # the gh CLI from the `version` input. release_check.sh runs first, so a version that cannot be released
+        # fails here with one clear line instead of a half-made release or a 422 from the API.
         id: manual
         if: github.event_name == 'workflow_dispatch'
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          BUILT=$(sed -n 's/^#define LAUNCHER_VERSION *"\(.*\)"/\1/p' launcher/src/config.h)
-          VER="${INPUT_VERSION#v}"                       # accept "0.1.2" and "v0.1.2"
-          if [ -z "$VER" ]; then VER="$BUILT"; fi
-          if [ -z "$VER" ]; then
-            echo "::error::no version to release: set the version input or LAUNCHER_VERSION in launcher/src/config.h"
-            exit 1
-          fi
-          if ! printf '%s' "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::'$VER' is not a version like 0.1.2"
-            exit 1
-          fi
-          if [ "$VER" != "$BUILT" ]; then
-            echo "::error::v$VER cannot be released from this commit: the exe reports $BUILT (LAUNCHER_VERSION in"
-            echo "launcher/src/config.h). Bump that constant, commit it, and run again -- otherwise the tag, the"
-            echo "update check and the exe would disagree."
-            exit 1
-          fi
-          if gh release view "v$VER" >/dev/null 2>&1; then
-            echo "::error::release v$VER already exists (https://github.com/${{ github.repository }}/releases/tag/v$VER). Bump LAUNCHER_VERSION to the next version instead of publishing this one again."
-            exit 1
-          fi
-          if git ls-remote --exit-code --tags origin "refs/tags/v$VER" >/dev/null 2>&1; then
-            echo "::error::tag v$VER already exists on origin without a release pointing at it; delete it or pick another version."
-            exit 1
-          fi
+          VER=$(bash launcher/tools/release_check.sh "$INPUT_VERSION" manual)
           awk -v v="v$VER" '/^## /{inside = ($2 == v); if (inside) next} inside' CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then
             echo "::error::CHANGELOG.md has no '## v$VER' section; write the release notes for v$VER first."
