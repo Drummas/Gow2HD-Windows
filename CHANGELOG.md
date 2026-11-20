@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.2 (2026-11-20)
+
+The exe reports the version it was actually built as, and a release is published only after its build succeeded.
+
+* **Launcher:** the file and product version of `Gow2HD-Windows.exe` (Windows Properties, and the embedded manifest)
+  is generated from `LAUNCHER_VERSION` in `src/config.h` at build time instead of being written by hand, so the
+  binary can no longer report an older version than the tag it came from, and bumping the version is one edit.
+* **Release:** `build.cmd` writes that version resource before `windres` runs, and the release workflow builds, checks
+  and scans the launcher first and creates the release only afterwards, so a failed build no longer leaves a
+  published release without `Gow2HD-Windows.exe`. The version checks are unchanged and still run before anything is
+  built, so a version that cannot be released fails in seconds.
+
 ## v0.1.1 (2026-11-20)
 
 Install folders and checkouts can be renamed or moved without confusing the launcher.
