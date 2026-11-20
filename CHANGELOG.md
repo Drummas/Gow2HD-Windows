@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.3 (2026-11-20)
+
+The launcher keeps its settings next to itself and builds into the folder you pick.
+
+* **Launcher:** the remembered install folder is stored in `launcher.ini` next to the exe (`install_dir=`), not in
+  `HKCU\Software\GoW2-Windows`, so nothing is written to the registry any more: an install can be copied, moved or
+  deleted as a folder, and a reinstall no longer inherits the previous install's game and licence paths from the
+  machine. The exe's own folder still wins when it is an install, and a remembered folder that is gone still offers
+  the folder picker.
+* **Setup:** picking the build folder builds into it exactly: no `GoW2-Windows` subfolder is created inside a folder
+  that already has files.
+
 ## v0.1.2 (2026-11-20)
 
 The exe reports the version it was actually built as, and a release is published only after its build succeeded.

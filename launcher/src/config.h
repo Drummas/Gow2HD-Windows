@@ -1,8 +1,8 @@
 // Gow2HD-Windows launcher - constants. Change these in one place.
 #pragma once
 
-#define LAUNCHER_VERSION      "0.1.2"
-#define LAUNCHER_VERSION_W    L"0.1.2"
+#define LAUNCHER_VERSION      "0.1.3"
+#define LAUNCHER_VERSION_W    L"0.1.3"
 #define LAUNCHER_EXE_NAME     L"Gow2HD-Windows.exe"
 
 // GitHub repository (owner/name) that publishes the launcher releases: the update check, the scripts download
