@@ -56,6 +56,10 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The precheck reads the commits of the push (before..after), and the default one-commit clone does not
+          # contain the push's first commit, so the range would resolve to nothing and no release would ever start.
+          fetch-depth: 0
 
       - name: Check the version before anything is created
         # This reads the same subjects the action will match and runs launcher/tools/release_check.sh on each
@@ -72,6 +76,9 @@ jobs:
           else
             RANGE="$BEFORE..$AFTER"
           fi
+          # Read the subjects in one go: a range that does not resolve has to stop the job, not leave `found` at 0
+          # and silently skip the release.
+          SUBJECTS=$(git log --format=%s "$RANGE")
           found=0
           while IFS= read -r subject; do
             if ! printf '%s' "$subject" | grep -Eq '^[Rr]elease: v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?([[:space:]]|$)'; then
@@ -80,7 +87,7 @@ jobs:
             found=1
             VER=$(printf '%s' "$subject" | grep -Eo '^[Rr]elease: v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' | sed -E 's/^[Rr]elease: v//')
             bash launcher/tools/release_check.sh "$VER" push >/dev/null
-          done < <(git log --format=%s "$RANGE")
+          done <<< "$SUBJECTS"
           echo "released=$([ "$found" = 1 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           if [ "$found" = 0 ]; then echo "no Release: vX.Y.Z subject in this push; nothing to check"; fi
 
